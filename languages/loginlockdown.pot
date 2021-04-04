@@ -151,9 +151,9 @@ msgstr ""
 msgid "<strong>ERROR</strong>: Invalid username or incorrect password."
 msgstr ""
 
-#: loginlockdown.php:497
+#: loginlockdown.php:521
 #, php-format
-msgid "<strong>ERROR</strong>: Invalid username or incorrect password. <a href=\"%s\" title=\"Password Lost and Found\">Lost your password</a>?"
+msgid "<strong>ERROR</strong>: Invalid username or incorrect password. <a href="%s" title="Password Lost and Found">Lost your password</a>? %d attempts left"
 msgstr ""
 
 
