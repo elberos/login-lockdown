@@ -450,90 +450,149 @@ if ( isset($loginlockdown_db_version) ) {
 	$activatestr = str_replace(WP_PLUGIN_DIR . "/", "activate_", __FILE__);
 	add_action($activatestr, 'loginLockdown_install');
 
-	remove_filter('authenticate', 'wp_authenticate_username_password', 20, 3);
-	add_filter('authenticate', 'll_wp_authenticate_username_password', 20, 3);
-	//Filters
-	//Functions
-	function ll_wp_authenticate_username_password($user, $username, $password) {
+	// authenticate filter
+	remove_filter('authenticate', 'wp_authenticate_email_password', 20, 3);
+	add_filter('authenticate', 'll_wp_authenticate_username_password', 99999, 3);
+	add_filter('lostpassword_errors', 'll_lostpassword_errors', 99999, 2);
+	function ll_wp_authenticate_username_password($user, $username, $password)
+	{
+		global $wpdb, $error;
+		global $loginlockdownOptions;
+
+		$username = sanitize_user($username);
+		$password = trim($password);
 		
-		if ( is_a($user, 'WP_User') ) { return $user; }
-
-		if ( empty($username) || empty($password) ) {
-			$error = new WP_Error();
-
-			if ( empty($username) )
-				$error->add('empty_username', __('<strong>ERROR</strong>: The username field is empty.', 'loginlockdown'));
-
-			if ( empty($password) )
-				$error->add('empty_password', __('<strong>ERROR</strong>: The password field is empty.', 'loginlockdown'));
-
-			return $error;
+		if ( "" != isLockedDown() )
+		{
+			return new WP_Error('authentication_failed', __("<strong>ERROR</strong>: We're sorry, but this IP range has been blocked due to too many recent failed login attempts.<br /><br />Please try again later.", 'loginlockdown'));
 		}
-
-		$userdata = get_user_by('login',$username);
-
-		if ( !$userdata ) {
-			return new WP_Error('invalid_username', sprintf(__('<strong>ERROR</strong>: Invalid username. <a href="%s" title="Password Lost and Found">Lost your password</a>?', 'loginlockdown'), site_url('wp-login.php?action=lostpassword', 'login')));
+		
+		if ( is_a($user, 'WP_User') )
+		{
+			return $user;
 		}
-
-		$userdata = apply_filters('wp_authenticate_user', $userdata, $password);
-		if ( is_wp_error($userdata) ) {
-			return $userdata;
+		
+		$ignore_codes = array('empty_username', 'empty_password');
+		$max_login_retries = $loginlockdownOptions['max_login_retries'];
+		$count_fails = countFails($username);
+		$attempts_left = $max_login_retries - $count_fails - 1;
+		
+		if (is_wp_error($user) && !in_array($user->get_error_code(), $ignore_codes))
+		{
+			incrementFails($username);
+			if ( $attempts_left == 0 )
+			{
+				lockDown($username);
+				return new WP_Error('authentication_failed', __("<strong>ERROR</strong>: We're sorry, but this IP range has been blocked due to too many recent failed login attempts.<br /><br />Please try again later.", 'loginlockdown'));
+			}
+			if ( 'yes' == $loginlockdownOptions['mask_login_errors'] )
+			{
+				return new WP_Error('authentication_failed', sprintf(__('<strong>ERROR</strong>: Invalid username or incorrect password. <a href="%s" title="Password Lost and Found">Lost your password</a>? %d attempts left', 'loginlockdown'), site_url('wp-login.php?action=lostpassword', 'login'), $attempts_left));
+			}
 		}
-
-		if ( !wp_check_password($password, $userdata->user_pass, $userdata->ID) ) {
-			return new WP_Error('incorrect_password', sprintf(__('<strong>ERROR</strong>: Incorrect password. <a href="%s" title="Password Lost and Found">Lost your password</a>?', 'loginlockdown'), site_url('wp-login.php?action=lostpassword', 'login')));
-		}
-
-		$user =  new WP_User($userdata->ID);
+		
 		return $user;
 	}
-
 	
-	if ( !function_exists('wp_authenticate') )
+	function ll_lostpassword_errors($errors, $user_data)
 	{
-		function wp_authenticate($username, $password) {
-			global $wpdb, $error;
-			global $loginlockdownOptions;
+		global $loginlockdownOptions;
 
-			$username = sanitize_user($username);
-			$password = trim($password);
-
-			if ( "" != isLockedDown() ) {
-				return new WP_Error('incorrect_password', __("<strong>ERROR</strong>: We're sorry, but this IP range has been blocked due to too many recent failed login attempts.<br /><br />Please try again later.", 'loginlockdown'));
-			}
-
-			$user = apply_filters('authenticate', null, $username, $password);
-
-			if ( $user == null ) {
-				// TODO what should the error message be? (Or would these even happen?)
-				// Only needed if all authentication handlers fail to return anything.
-				$user = new WP_Error('authentication_failed', __('<strong>ERROR</strong>: Invalid username or incorrect password.', 'loginlockdown'));
-			}
-
-			$ignore_codes = array('empty_username', 'empty_password');
-			
+		$username = isset($_POST['user_login']) ? $_POST['user_login'] : "";
+		$username = sanitize_user($username);
+		
+		if ( "" != isLockedDown() )
+		{
+			return new WP_Error('authentication_failed', __("<strong>ERROR</strong>: We're sorry, but this IP range has been blocked due to too many recent failed login attempts.<br /><br />Please try again later.", 'loginlockdown'));
+		}
+		
+		if ( !is_a($user, 'WP_User') )
+		{
 			$max_login_retries = $loginlockdownOptions['max_login_retries'];
 			$count_fails = countFails($username);
 			$attempts_left = $max_login_retries - $count_fails - 1;
+		
+			incrementFails($username);
 			
-			if (is_wp_error($user) && !in_array($user->get_error_code(), $ignore_codes) ) {
-				incrementFails($username);
-				if ( $attempts_left == 0 ) {
-					lockDown($username);
-					return new WP_Error('incorrect_password', __("<strong>ERROR</strong>: We're sorry, but this IP range has been blocked due to too many recent failed login attempts.<br /><br />Please try again later.", 'loginlockdown'));
-				}
-				if ( 'yes' == $loginlockdownOptions['mask_login_errors'] ) {
-					return new WP_Error('authentication_failed', sprintf(__('<strong>ERROR</strong>: Invalid username or incorrect password. <a href="%s" title="Password Lost and Found">Lost your password</a>? %d attempts left', 'loginlockdown'), site_url('wp-login.php?action=lostpassword', 'login'), $attempts_left));
-				} else {
-					do_action('wp_login_failed', $username);
-				}
+			if ( $attempts_left == 0 )
+			{
+				lockDown($username);
+				return new WP_Error('authentication_failed', __("<strong>ERROR</strong>: We're sorry, but this IP range has been blocked due to too many recent failed login attempts.<br /><br />Please try again later.", 'loginlockdown'));
+			}
+			if ( 'yes' == $loginlockdownOptions['mask_login_errors'] )
+			{
+				return new WP_Error('authentication_failed', sprintf(__('<strong>ERROR</strong>: Invalid username. %d attempts left', 'loginlockdown'), $attempts_left));
+			}
+		}
+		
+		return $errors;
+	}
+	
+	if ( !function_exists('wp_authenticate') )
+	{
+		/**
+		 * Authenticate a user, confirming the login credentials are valid.
+		 *
+		 * @since 2.5.0
+		 * @since 4.5.0 `$username` now accepts an email address.
+		 *
+		 * @param string $username User's username or email address.
+		 * @param string $password User's password.
+		 * @return WP_User|WP_Error WP_User object if the credentials are valid,
+		 *                          otherwise WP_Error.
+		 */
+		function wp_authenticate( $username, $password ) {
+			$username = sanitize_user( $username );
+			$password = trim( $password );
+			
+			if ( "" != isLockedDown() )
+			{
+				return new WP_Error('authentication_failed', __("<strong>ERROR</strong>: We're sorry, but this IP range has been blocked due to too many recent failed login attempts.<br /><br />Please try again later.", 'loginlockdown'));
 			}
 			
+			/**
+			 * Filters whether a set of user login credentials are valid.
+			 *
+			 * A WP_User object is returned if the credentials authenticate a user.
+			 * WP_Error or null otherwise.
+			 *
+			 * @since 2.8.0
+			 * @since 4.5.0 `$username` now accepts an email address.
+			 *
+			 * @param null|WP_User|WP_Error $user     WP_User if the user is authenticated.
+			 *                                        WP_Error or null otherwise.
+			 * @param string                $username Username or email address.
+			 * @param string                $password User password
+			 */
+			$user = apply_filters( 'authenticate', null, $username, $password );
+
+			if ( null == $user ) {
+				// TODO: What should the error message be? (Or would these even happen?)
+				// Only needed if all authentication handlers fail to return anything.
+				$user = new WP_Error( 'authentication_failed', __( '<strong>Error</strong>: Invalid username, email address or incorrect password.' ) );
+			}
+
+			$ignore_codes = array( 'empty_username', 'empty_password' );
+
+			if ( is_wp_error( $user ) && ! in_array( $user->get_error_code(), $ignore_codes, true ) ) {
+				$error = $user;
+
+				/**
+				 * Fires after a user login has failed.
+				 *
+				 * @since 2.5.0
+				 * @since 4.5.0 The value of `$username` can now be an email address.
+				 * @since 5.4.0 The `$error` parameter was added.
+				 *
+				 * @param string   $username Username or email address.
+				 * @param WP_Error $error    A WP_Error object with the authentication failure details.
+				 */
+				do_action( 'wp_login_failed', $username, $error );
+			}
+
 			return $user;
 		}
 	}
-	
 	
 	// Cron
 	if ( !wp_next_scheduled( 'loginlockdown_release_event' ) )
