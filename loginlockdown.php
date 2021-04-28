@@ -251,8 +251,8 @@ function get_loginlockdownOptions() {
 		'max_login_retries' => 5,
 		'retries_within' => 10,
 		'lockout_length' => 60,
-		'lockout_invalid_usernames' => 'no',
-		'mask_login_errors' => 'no',
+		'lockout_invalid_usernames' => 'yes',
+		'mask_login_errors' => 'yes',
 		'show_credit_link' => 'no'
 	);
 	$loginlockdownOptions = get_option("loginlockdownAdminOptions");
