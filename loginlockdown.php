@@ -506,7 +506,16 @@ if ( isset($loginlockdown_db_version) ) {
 			return new WP_Error('authentication_failed', __("<strong>ERROR</strong>: We're sorry, but this IP range has been blocked due to too many recent failed login attempts.<br /><br />Please try again later.", 'loginlockdown'));
 		}
 		
-		if ( !is_a($user, 'WP_User') )
+		// Check login
+		if ( is_a($user_data, 'WP_User') )
+		{
+			if ($username != $user_data->user_login)
+			{
+				$user_data = null;
+			}
+		}
+		
+		if ( !is_a($user_data, 'WP_User') )
 		{
 			$max_login_retries = $loginlockdownOptions['max_login_retries'];
 			$count_fails = countFails($username);
